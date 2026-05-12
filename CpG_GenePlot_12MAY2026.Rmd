@@ -1,0 +1,442 @@
+---
+title: "Genomic plots"
+author: "Katherine I. Cooper"
+date: "2026-05-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Genomic plots for comparison
+
+A few genes have vastly different mean CpG counts: _NRL, THRB_.
+
+**GOAL:** Look at the sequences for CpG islands
+
+```{r, include=FALSE}
+
+# CRAN packages
+cran.pkgs <- c("tidyverse",
+               "patchwork",
+               "gridExtra",
+               "BiocManager"
+                )
+for (pkg in cran.pkgs) {
+   if (!requireNamespace(pkg, quietly = TRUE)) {
+     install.packages(pkg, update = TRUE, ask = FALSE, force = TRUE)
+   }
+   library(pkg, character.only = TRUE)
+ }
+
+
+# Bioconductor packages
+bioc.pkgs <- c("GenomicFeatures",
+              "AnnotationDbi",
+              "biomaRt",
+              "org.Hs.eg.db",
+              "org.Mm.eg.db",
+              "org.Gg.eg.db",
+              "BSgenome.Hsapiens.UCSC.hg38",
+              "BSgenome.Mmusculus.UCSC.mm39",
+              "ggbio"
+                )
+for (pkg in bioc.pkgs) {
+   if (!requireNamespace(pkg, quietly = TRUE)) {
+     BiocManager::install(pkg, update = TRUE, ask = FALSE, force = TRUE)
+   }
+   library(pkg, character.only = TRUE)
+ }
+
+```
+
+### Step 1: Getting the sequences for 1,000 bp
+
+```{r}
+#Creating a dataframe of the genes
+Genes.of.int <- data.frame (
+  "Human" = c("THRB", "NRL"),
+  "Mouse" = c("Thrb", "Nrl"))
+
+#Mapping the gene symbols to the Ensembl
+Ensembl_names.Hs <- mapIds(org.Hs.eg.db, 
+                        keys = Genes.of.int$Human, 
+                        keytype = "SYMBOL", 
+                        column = "ENSEMBL")
+
+Ensembl_names.Mm <- mapIds(org.Mm.eg.db,
+                           keys = Genes.of.int$Mouse,
+                           keytype = "SYMBOL",
+                           column = "ENSEMBL")
+
+#Adding to the Df. 
+Genes.of.int$Ensembl.Mm <- Ensembl_names.Mm
+Genes.of.int$Ensembl.Hs <- Ensembl_names.Hs
+
+head(Genes.of.int)
+```
+
+I will be using the 1kb flanking region around the canonical start site. 
+
+#### Starting with human 
+
+```{r}
+#Using Ensembl mart archive for a stable connection:
+ensembl.hs <- useMart("ensembl",
+                      dataset = "hsapiens_gene_ensembl",
+                      host = "https://may2025.archive.ensembl.org")
+
+#Acquiring the TSS info
+tss_info.Hs.THRB <- getBM(filters = "ensembl_gene_id", 
+                  values = Genes.of.int$Ensembl.Hs[1], 
+                  attributes = c("chromosome_name", "transcription_start_site", "strand"), 
+                  mart = ensembl.hs)
+
+#Getting the canonical start for THRB
+tss_info.Hs.THRB <- tss_info.Hs.THRB[1, ]
+
+#Creating the range...THRB seems to be reverse so the start and end are flipped.
+start <- tss_info.Hs.THRB$transcription_start_site +1000 
+end <- tss_info.Hs.THRB$transcription_start_site - 1000
+
+#Flipping start and end...
+tss_range.Hs.THRB <- GRanges(seqnames = paste0("chr", tss_info.Hs.THRB$chromosome_name), 
+                       ranges = IRanges(start = end, end = start), 
+                       strand = ifelse(tss_info.Hs.THRB$strand == 1, "+", "-"))
+
+remove(start)
+remove(end)
+head(tss_range.Hs.THRB)
+```
+
+Getting the BS DNA 
+
+```{r}
+DNA.Hs.THRB <- getSeq(BSgenome.Hsapiens.UCSC.hg38, tss_range.Hs.THRB)
+
+head(DNA.Hs.THRB)
+```
+
+#### Repeating for the other four... 
+
+I do not want to make a loop. I am sorry :(
+
+```{r}
+#Acquiring the TSS info
+tss_info.Hs.NRL <- getBM(filters = "ensembl_gene_id", 
+                  values = Genes.of.int$Ensembl.Hs[2], 
+                  attributes = c("chromosome_name", "transcription_start_site", "strand"), 
+                  mart = ensembl.hs)
+
+#Getting the canonical start for NRL
+tss_info.Hs.NRL <- tss_info.Hs.NRL[1, ]
+
+#Creating the range...THRB seems to be reverse so the start and end are flipped.
+start <- tss_info.Hs.NRL$transcription_start_site +1000 
+end <- tss_info.Hs.NRL$transcription_start_site - 1000
+
+#Flipping start and end...
+tss_range.Hs.NRL <- GRanges(seqnames = paste0("chr", tss_info.Hs.NRL$chromosome_name), 
+                       ranges = IRanges(start = end, end = start), 
+                       strand = ifelse(tss_info.Hs.NRL$strand == 1, "+", "-"))
+
+remove(start)
+remove(end)
+
+DNA.Hs.NRL <- getSeq(BSgenome.Hsapiens.UCSC.hg38, tss_range.Hs.NRL)
+head(DNA.Hs.NRL)
+```
+
+#### Now for mouse!
+
+```{r}
+ensembl.mm <- useMart("ensembl", 
+                     dataset = "mmusculus_gene_ensembl", 
+                     host = "https://dec2021.archive.ensembl.org")
+
+#Acquiring the TSS info
+tss_info.Mm.Thrb <- getBM(filters = "ensembl_gene_id", 
+                  values = Genes.of.int$Ensembl.Mm[1], 
+                  attributes = c("chromosome_name", "transcription_start_site", "strand"), 
+                  mart = ensembl.mm)
+
+#Getting the canonical start for THRB
+tss_info.Mm.Thrb <- tss_info.Mm.Thrb[1, ]
+
+#Creating the range...THRB seems to be reverse so the start and end are flipped.
+start <- tss_info.Mm.Thrb$transcription_start_site +1000 
+end <- tss_info.Mm.Thrb$transcription_start_site - 1000
+
+#Flipping start and end...
+tss_range.Mm.Thrb <- GRanges(seqnames = paste0("chr", tss_info.Mm.Thrb$chromosome_name), 
+                       ranges = IRanges(start = end, end = start), 
+                       strand = ifelse(tss_info.Mm.Thrb$strand == 1, "+", "-"))
+
+remove(start)
+remove(end)
+
+DNA.Mm.Thrb <- getSeq(BSgenome.Mmusculus.UCSC.mm39, tss_range.Mm.Thrb)
+head(DNA.Mm.Thrb)
+```
+
+NRL
+```{r}
+#Acquiring the TSS info
+tss_info.Mm.Nrl <- getBM(filters = "ensembl_gene_id", 
+                  values = Genes.of.int$Ensembl.Mm[2], 
+                  attributes = c("chromosome_name", "transcription_start_site", "strand"), 
+                  mart = ensembl.mm)
+
+#Getting the canonical start for NRL
+tss_info.Mm.Nrl <- tss_info.Mm.Nrl[1, ]
+
+#Creating the range...THRB seems to be reverse so the start and end are flipped.
+start <- tss_info.Mm.Nrl$transcription_start_site +1000 
+end <- tss_info.Mm.Nrl$transcription_start_site - 1000
+
+#Flipping start and end...
+tss_range.Mm.Nrl <- GRanges(seqnames = paste0("chr", tss_info.Mm.Nrl$chromosome_name), 
+                       ranges = IRanges(start = end, end = start), 
+                       strand = ifelse(tss_info.Mm.Nrl$strand == 1, "+", "-"))
+
+remove(start)
+remove(end)
+
+DNA.Mm.Nrl <- getSeq(BSgenome.Mmusculus.UCSC.mm39, tss_range.Mm.Nrl)
+head(DNA.Mm.Nrl)
+```
+
+### Step 2: plotting using ggBio 
+
+Need to convert the sequences into characters to parse for any occurance of CG. 
+
+#### Hs NRL
+
+```{r}
+
+#Convert sequence to a character vector
+dna_str <- as.character(DNA.Hs.NRL)
+bases <- strsplit(dna_str, "")[[1]]
+
+#Create a status vector: default to "Other" to separate out the "CG"s
+color_status <- rep("Other", length(bases))
+
+#Identify CpGs
+for (i in 1:(length(bases) - 1)) {
+  if (bases[i] == "C" && bases[i+1] == "G") {
+    color_status[i] <- "CG"
+    color_status[i+1] <- "CG"
+  }
+}
+
+#Expand your TSS range into 1-bp intervals
+gr_expanded.HN <- unlist(tile(tss_range.Hs.NRL, width = 1))
+
+#Add the new metadata column
+mcols(gr_expanded.HN)$is_cg <- color_status
+
+Hs.NRL.plot <- autoplot(gr_expanded.HN, geom = "rect", aes(fill = is_cg, color = is_cg)) +
+  geom_vline(aes(xintercept = tss_info.Hs.NRL$transcription_start_site), color = "black", linewidth = 1.5) +
+  scale_fill_manual(values = c("CG" = "#E41A1C",
+                               "Other" = "#D3D3D3")) + 
+  scale_color_manual(values = c("CG" = "#E41A1C",  
+                               "Other" = "#D3D3D3")) +
+  labs(color = "CpG",
+       fill = "CpG",
+       title = "Human NRL") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 20,
+                              hjust = 0.5,
+                              margin = margin(b = 15, unit = "pt")),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = 17,
+                                face = "bold"),
+    legend.position = "top"
+  )
+
+Hs.NRL.plot
+```
+
+#### Hs THRB
+
+```{r, HsTHRBPlot}
+
+#Convert sequence to a character vector
+dna_str <- as.character(DNA.Hs.THRB)
+bases <- strsplit(dna_str, "")[[1]]
+
+#Create a status vector
+color_status <- rep("Other", length(bases))
+
+# Identify CpGs
+for (i in 1:(length(bases) - 1)) {
+  if (bases[i] == "C" && bases[i+1] == "G") {
+    color_status[i] <- "CG"
+    color_status[i+1] <- "CG"
+  }
+}
+
+#Expand your TSS range into 1-bp intervals
+gr_expanded.HT <- unlist(tile(tss_range.Hs.THRB, width = 1))
+
+#Add the new metadata column
+mcols(gr_expanded.HT)$is_cg <- color_status
+
+#Autoplot using ggbio
+Hs.THRB.plot <- autoplot(gr_expanded.HT, geom = "rect", aes(fill = is_cg, color = is_cg)) +
+  geom_vline(aes(xintercept = tss_info.Hs.THRB$transcription_start_site), color = "black", linewidth = 1.5) +
+  scale_fill_manual(values = c("CG" = "#E41A1C",
+                               "Other" = "#D3D3D3")) + 
+  scale_color_manual(values = c("CG" = "#E41A1C",  
+                               "Other" = "#D3D3D3")) +
+  labs(color = "CpG",
+       fill = "CpG",
+       title = "Human THRB") +
+  
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 20,
+                              hjust = 0.5,
+                              margin = margin(b = 15, unit = "pt")),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = 17,
+                                face = "bold"),
+    legend.position = "none"
+  )
+
+
+Hs.THRB.plot
+
+```
+
+#### Mm NRL
+
+```{r, MmNRLPlot}
+
+#Convert sequence to a character vector
+dna_str <- as.character(DNA.Mm.Nrl)
+bases <- strsplit(dna_str, "")[[1]]
+
+#Create a status vector
+color_status <- rep("Other", length(bases))
+
+#Identify CpGs
+for (i in 1:(length(bases) - 1)) {
+  if (bases[i] == "C" && bases[i+1] == "G") {
+    color_status[i] <- "CG"
+    color_status[i+1] <- "CG"
+  }
+}
+
+#Expand your TSS range into 1-bp intervals
+gr_expanded.MN <- unlist(tile(tss_range.Mm.Nrl, width = 1))
+
+#Add the new metadata column
+mcols(gr_expanded.MN)$is_cg <- color_status
+
+Mm.Nrl.plot <- autoplot(gr_expanded.MN, geom = "rect", aes(fill = is_cg, color = is_cg)) +
+  geom_vline(aes(xintercept = tss_info.Mm.Nrl$transcription_start_site), color = "black", linewidth = 1.5) +
+  scale_fill_manual(values = c("CG" = "#E41A1C",
+                               "Other" = "#D3D3D3")) + 
+  scale_color_manual(values = c("CG" = "#E41A1C",  
+                               "Other" = "#D3D3D3")) +
+  labs(color = "CpG",
+       fill = "CpG",
+       title = "Mouse NRL") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 20,
+                              hjust = 0.5,
+                              margin = margin(b = 15, unit = "pt")),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = 17,
+                                face = "bold"),
+    legend.position = "none"
+  )
+
+
+Mm.Nrl.plot
+```
+
+#### Mm THRB
+
+```{r, MmTHRBPlot}
+
+#Convert sequence to a character vector
+dna_str <- as.character(DNA.Mm.Thrb)
+bases <- strsplit(dna_str, "")[[1]]
+
+#Create a status vector
+color_status <- rep("Other", length(bases))
+
+#Identify CpGs
+for (i in 1:(length(bases) - 1)) {
+  if (bases[i] == "C" && bases[i+1] == "G") {
+    color_status[i] <- "CG"
+    color_status[i+1] <- "CG"
+  }
+}
+
+#Expand your TSS range into 1-bp intervals
+gr_expanded.MT <- unlist(tile(tss_range.Mm.Thrb, width = 1))
+
+#Add the new metadata column
+mcols(gr_expanded.MT)$is_cg <- color_status
+
+Mm.Thrb.plot <- autoplot(gr_expanded.MT, geom = "rect", aes(fill = is_cg, color = is_cg)) +
+  geom_vline(aes(xintercept = tss_info.Mm.Thrb$transcription_start_site), color = "black", linewidth = 1.5) +
+  scale_fill_manual(values = c("CG" = "#E41A1C",
+                               "Other" = "#D3D3D3")) + 
+  scale_color_manual(values = c("CG" = "#E41A1C",  
+                               "Other" = "#D3D3D3")) +
+  labs(color = "CpG",
+       fill = "CpG",
+       title = "Mouse THRB") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 20,
+                              hjust = 0.5,
+                              margin = margin(b = 15, unit = "pt")),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = 17,
+                                face = "bold"),
+    legend.position = "none"
+  )
+
+Mm.Thrb.plot
+```
+
+### Step 3: Combining all
+
+Combining all the plots using gridExtra to account for the ggbio objects.
+
+```{r, finalplot, fig.height=8, fig.width=4}
+
+#Converting ggbio objects to ggplot to use with gridExtra
+p1 <- Hs.NRL.plot@ggplot
+p2 <- Mm.Nrl.plot@ggplot
+p3 <- Hs.THRB.plot@ggplot
+p4 <- Mm.Thrb.plot@ggplot
+
+#Combine with collected legends so the sizes are all the same
+full.cpg<- wrap_plots(p1, p2, p3, p4, ncol = 1,  heights = c(2, 2, 2, 2)) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom")
+
+full.cpg
+```
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
