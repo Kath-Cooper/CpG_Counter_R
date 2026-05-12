@@ -16,3 +16,5 @@ For user input, please provide a data frame containing the gene IDs you wish to 
 The full caps version of Rho would not be recognized when analyzing a human genome. 
 
 The countCpG function works on tidyverse commands as well as various R packages containing the reference genomes and annotations per species. The function communicates with Ensembl for the annotations. An internet connection is required to access the web-based Ensembl database. 
+
+Each file has the R markdown (RMD) file needed to run the analysis as well as a knitted PDF of the RMD. 
