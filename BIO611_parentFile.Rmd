@@ -1,0 +1,251 @@
+---
+title: "Methylation"
+author: "Katherine I. Cooper"
+date: "2026-05-01"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Methylation detection
+
+Please run all chunks here and move to the parent file afterwards. This file contains **libraries** and a **function.**
+
+```{r, echo = F}
+#BioConductor is required for this. 
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+# CRAN packages
+base.pkgs <- c("tidyverse",
+               "stringr")
+
+for (pkg in base.pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+# Bioconductor packages
+bioc.pkgs <- c("GenomicFeatures",
+               "AnnotationDbi",
+               "biomaRt",
+               "org.Hs.eg.db",
+               "org.Mm.eg.db",
+               "BSgenome.Hsapiens.UCSC.hg38",
+               "BSgenome.Mmusculus.UCSC.mm39"
+               )
+
+for (pkg in bioc.pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg, update = TRUE, ask = FALSE, force = TRUE)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+
+library(stringr)
+library(GenomicFeatures)
+library(BSgenome.Mmusculus.UCSC.mm39)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(TxDb.Mmusculus.UCSC.mm39.knownGene)
+library(biomaRt)
+```
+
+## CG dinucleotide counter:
+
+The following code cell contains a function that automatically compiles CG dinucleotides from a reference genome. To view the code, uncollapse the cell; however, this is non-essential for running the function.
+
+To load the function, please click the green arrow on the right-side of the code cell. This will load the function into your environment. It is called: countCpG.
+
+
+```{r, countCpG}
+
+countCpG <- function(df, GeneIDs, flankRegion, species){
+    
+  # Set-up for the species specific portion
+    
+    #Which packages are needed
+  message(paste("Loading packages for", species, "."))
+  
+  Species.pkgs <- switch(species,
+    "Hs" =  c("BSgenome.Hsapiens.UCSC.hg38",
+                   "org.Hs.eg.db"),
+    "Mm" = c("BSgenome.Mmusculus.UCSC.mm39",
+                        "org.Mm.eg.db"),
+    "Gg" = c("BSgenome.Ggallus.UCSC.galGal5",
+             "org.Gg.eg.db"),
+    stop("Invalid species choice. Supported options: Homo sapiens (Hs), Mus musculus (Mm), Gallus gallus (Gg).")
+    )
+  
+  sapply(Species.pkgs, library, character.only = T)
+  
+  #Assigning the ensembl 
+  
+   ensembl <- switch(species,
+      "Hs" = useMart("ensembl", 
+                     dataset = "hsapiens_gene_ensembl", 
+                     host = "https://may2025.archive.ensembl.org"),
+      "Mm" = useMart("ensembl", 
+                     dataset = "mmusculus_gene_ensembl", 
+                     host = "https://dec2021.archive.ensembl.org"),
+      "Gg" = useMart("ensembl", 
+                     dataset = "ggallus_gene_ensembl", 
+                     host = "https://dec2021.archive.ensembl.org"),
+      stop("Invalid species choice. Supported options: Homo sapiens (Hs), Mus musculus (Mm), Gallus gallus (Gg)"))
+   
+   BSgenome.sp <- switch(species,
+     "Hs" = BSgenome.Hsapiens.UCSC.hg38,
+     "Mm" = BSgenome.Mmusculus.UCSC.mm39,
+     "Gg" = BSgenome.Ggallus.UCSC.galGal5,
+     stop("Unknown BSgenome object")
+   )
+    
+    genes = df[[GeneIDs]]
+  
+  #Mapping the ensembl names to the symbols
+    
+  #Getting which ensembl db
+    
+    pkg.map <- c(
+      "Mm" = "org.Mm.eg.db",
+      "Hs" = "org.Hs.eg.db",
+      "Gg" = "org.Gg.eg.db"
+    )
+    
+  org.db <- get(pkg.map[[species]])
+  
+  Ensembl_names <- mapIds(org.db,
+    keys = genes, keytype = "SYMBOL", column = "ENSEMBL")
+  
+  ##loop set-ups 
+  
+  #Empty vector for the coords
+  coords <- list()
+  
+  #Flanking regions
+  flanks <- flankRegion
+  
+  #Counter for final df
+  counter = 1
+  
+  
+  ##Loop 1: Assigning TSS coordinate
+  for (n in genes) {
+    
+    #Message for which gene
+    
+    message(paste0("(", counter, "/", length(Ensembl_names), ") Processing: ", n))
+    
+    #Checking for NA
+    
+    if(is.na(Ensembl_names[n]) || is.null(Ensembl_names[n])) {
+      message(paste("Unknown gene SYMBOL ID for", n, "Skipping gene."))
+      next
+    }
+    
+    #Assinging the emsembl for the loop
+    Ensembl_id <- Ensembl_names[n]
+    
+    #Getting the TSS coordinate
+      tss_info <- getBM(
+      filters = "ensembl_gene_id", 
+      values = Ensembl_id,
+      attributes = c("chromosome_name", "transcription_start_site", "strand"),
+      mart = ensembl
+    )
+      
+      #Skipping no TSS
+      if(is.null(tss_info) || nrow(tss_info) == 0) {
+        message(paste("Skipping gene:", n, "-No TSS information found in BioMart"))
+        next
+      }
+      
+      
+      #Assigning the TSS
+      
+      tss_info <- tss_info[1, ]
+    
+      ##Loop 2: Finding CGs in the gene per each flanking regions
+      for (i in flanks) {
+    
+      
+        #Adding/subtracting flanks
+    start_coord <- tss_info$transcription_start_site - i
+    end_coord <- tss_info$transcription_start_site + i
+    
+    #Ensuring the start/stop are not flipped because of - strand
+    if (start_coord > end_coord) {
+      temp <- start_coord
+      start_coord <- end_coord
+      end_coord <- temp
+    }
+    
+    #Pulling the DNA sequence info given the start/stop region
+    tss_range <- GRanges(
+      seqnames = paste0("chr", tss_info$chromosome_name),
+      ranges = IRanges(start = start_coord, end = end_coord),
+      strand = ifelse(tss_info$strand == 1, "+", "-")
+    )
+    
+    #Getting the actual sequence
+    tss_seqeunce <- getSeq(BSgenome.sp, tss_range)
+    
+    #Counting CG dinucleotides 
+    CpG_count <- str_count(as.character(tss_seqeunce), "CG")
+    
+    #Data frame accumulation 
+     coords[[counter]] <- data.frame(
+       Gene_id = n,
+       CpGs = CpG_count,
+       flanking_region = as.character(i)
+     )
+    
+     #Counter 
+     counter <- counter + 1
+     
+     #Message for done
+     
+     message(paste("Finished processing", n, "."))
+     
+      }
+
+  }
+  cpgCounts <- do.call(rbind, coords)
+  
+  #Final message
+  
+  message("--- Processing complete!---")
+  
+  return(cpgCounts)
+}
+
+```
+
+------------------------------------------------------------------------
+
+#### Function documentation:
+
+The following contains an example using a manually input data frame, genesTest. It is essential to have the proper syntax of the genes' symbols for mapping purpose: ex. RHO is incorrect in this instance. Rho is correct.
+
+There are three arguments the user needs to input:
+
+-   df: Identify the data containing the gene symbols
+
+-   GeneIDs: Which column contains the gene symbol IDs in the specified df. This needs to be in quotation marks.
+
+-   flankRegion: Specify the buffer regions around the TSS. This can be manually input or a vector.
+
+**Common errors:** start_coord length is zero implies an improper gene name. I am working on making a more human-interpretable error code.
+
+```{r}
+sessionInfo()
+```
+
