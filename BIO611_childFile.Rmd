@@ -1,0 +1,445 @@
+---
+title: "Child_file"
+output: pdf_document
+---
+
+# Child File
+
+```{r set-up, include = FALSE}
+knitr::set_parent("BIO611_parentFile.Rmd")
+knitr::opts_chunk$set(fig.crop = FALSE)
+```
+
+
+The analyses in this file work off the Methylation parent file containing the countCpG function. Please run all chunks on that file prior to proceeding here.
+
+```{r}
+genes <- read.csv("C:/Users/kathe/Documents/Enke/Data/gene_cell-type_methylationInput.csv")
+
+head(genes)
+```
+
+CpG counter
+
+```{r, message=FALSE}
+Mm_CpG <- countCpG(genes, "Gene", 
+                   flankRegion = c(50,100,200,500,1000), 
+                   species = "Mm")
+```
+
+```{r, message=FALSE}
+#Conversting Gene ID to upper since human symbols use the full capital format.
+genes$Gene <- toupper(genes$Gene)
+
+Hs_CpG <- countCpG(genes, 
+                   GeneIDs = "Gene", 
+                   flankRegion = c(50, 100, 200, 500, 1000), 
+                   species = "Hs")
+```
+
+### Plotting general distributions
+
+#### Loading libraries 
+
+These are all base CRAN libraries. Not Bioconductor.
+
+```{r, message=F, results='hide'}
+libs <- c("tidyverse",
+          "car",
+          "patchwork",
+          "lme4",
+          "ggeffects")
+
+sapply(libs, library, character.only = T)
+```
+
+**Plotting per species**
+
+Setting the theme. This is to ensure all the plots are cohesive with in the final product.
+```{r, warning=FALSE, message=FALSE}
+
+#Creating a theme for the document.
+theme_childFile <- function(){
+      theme(
+    #Legend manipulation
+    legend.position = "inside",
+    legend.position.inside = c(0.1,0.8),
+    legend.box.background = element_rect(color = "black",
+                                linewidth = 1),
+    legend.title = element_text(size = 14, 
+                                face = "bold"),
+    legend.text = element_text(size = 11,
+                               color= "black"),
+    #Panel manipulation
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black",
+                                linewidth = 1),
+    axis.ticks = element_line(linewidth = 1),
+    axis.ticks.length = unit(5, "pt"),
+    axis.minor.ticks.length = rel(0.5),
+    strip.background = element_rect(fill = "white", color = NA),
+    strip.text = element_text(size = 15,
+                              face = "bold"),
+    #Text manipulation
+    axis.title = element_text(face = "bold",
+                              size = 17),
+    axis.title.x = element_text(margin = margin(t = 7)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.text = element_text(size = 11, 
+                             color = "black")
+  )}
+```
+
+
+Mouse: 
+
+
+```{r}
+mouse.only <- ggplot() +
+  geom_histogram(data = Mm_CpG, aes(CpGs), stat = "bin",
+                 bins = 20,
+                 fill = "darkgrey",
+                 color = "black",
+                 alpha = 0.5)  +
+  labs(x = "Number of CpGs",
+       y = "Count",
+       title = "Mouse") +
+  theme_bw() +
+  theme_childFile()
+
+human.only <- ggplot() +
+  geom_histogram(data = Hs_CpG, aes(CpGs),
+                 stat = "bin",
+                 bins = 20,
+                 fill ="orchid3",
+                 color = "black",
+                 alpha = 0.5) +
+  labs(x = "Number of CpGs",
+       y = "Count",
+       title = "Human") +
+  theme_bw() +
+  theme_childFile()
+
+combined <- ggplot() +
+  geom_histogram(data = Mm_CpG, aes(CpGs), stat = "bin",
+                 bins = 20,
+                 fill = "darkgrey",
+                 color = "black",
+                 alpha = 0.5) +
+  geom_histogram(data = Hs_CpG, aes(CpGs),
+                 stat = "bin",
+                 bins = 20,
+                 fill = "orchid3",
+                 color = "black",
+                 alpha = 0.5)  +
+  labs(x = "Number of CpGs",
+       y = "Count") +
+  theme_bw() +
+  theme_childFile()
+
+full.histograms <- (mouse.only | human.only)/combined
+
+full.histograms
+```
+
+
+```{r}
+#Creating CpG_total data frame to house the CpGs, organism, and cell-type
+CpG_total <- Mm_CpG %>%
+  mutate(
+    Gene_id = toupper(Gene_id),
+    organism = "Mm"
+  ) %>%
+  left_join(genes, by = join_by("Gene_id" == "Gene"))
+
+
+#I did not do this in a great way. But it works.
+Hs_temp <- Hs_CpG %>%
+  mutate(organism = "Hs") %>%
+  left_join(genes, by = join_by("Gene_id" == "Gene"))
+
+CpG_total <- CpG_total %>%
+  rbind(Hs_temp) %>%
+  mutate(
+    Cell.type = as.factor(Cell.type),
+    organism = as.factor(organism),
+    flanking_region = as.numeric(flanking_region),
+    region = as.factor(flanking_region*2)
+  )
+
+rm(Hs_temp)
+head(CpG_total)
+```
+
+### Visualizing both species distribution
+
+Using a boxplot to look at the spread within cell-types and species.
+
+```{r}
+ggplot(CpG_total, aes(region, CpGs)) +
+  
+  #Adding in boxplot
+  geom_boxplot(aes(fill = organism),
+               staplewidth = 0.5,
+               width = 0.5,
+               alpha = 0.7,
+               outlier.shape = 20,
+               position = position_dodge(width = 0.7)) +
+  
+  #Adding in points
+  geom_point(aes(color = organism),
+             alpha = 0.5,
+             shape = 18,
+             position = position_dodge(width = 0.7)) +
+  facet_wrap(~Cell.type, labeller = as_labeller(c(
+    "both" = "Both",
+    "rod" = "Rod only",
+    "cone" = "Cone only"
+  ))) +
+  labs(x = "Flanking region around TSS",
+       y = "Number of CG dinucleotides",
+       fill = "Organism",
+       color = "Organism") +
+  guides(y = guide_axis(
+    minor.ticks = TRUE
+  )) +
+  scale_fill_manual(values = c("grey", "orchid1"),
+                    labels = c(
+                      "Hs" = "Human",
+                      "Mm" = "Mouse"
+                    )) +
+  scale_color_manual(values = c("grey1", "orchid4"),
+                    labels = c(
+                      "Hs" = "Human",
+                      "Mm" = "Mouse"
+                    )) +
+  
+  #Renaming since flanking region is a double and region was a factor. 
+  scale_x_discrete(labels = c(
+    "100" = "50",
+    "200" = "100",
+    "400" = "200",
+    "1000" = "500",
+    "2000" = "1000"
+  )) +
+  theme_bw() +
+  theme_childFile()
+
+#ggsave("CpG_Boxplots.png", height = 5, width = 7)
+```
+
+
+### Plotting each gene
+
+Plotting to see the distribution within each gene
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(CpG_total, aes(Gene_id, CpGs, color = organism)) +
+  geom_point(position = position_dodge(width = 1),
+             alpha = 0.3) +
+  stat_summary(fun = "mean", 
+               position = position_dodge(width = 1)) +
+  stat_summary(fun = "mean",
+               geom = "point",
+               shape = 95,
+               size = 8,
+               position = position_dodge(width=1)) +
+  facet_wrap(~Cell.type, 
+             nrow = 3,
+             scales = "free", 
+             labeller = as_labeller(c(
+                "both" = "Both",
+                "rod" = "Rod only",
+                "cone" = "Cone only")))  +
+  scale_color_manual(values = c("darkgrey", "orchid"),
+                    labels = c(
+                      "Hs" = "Human",
+                      "Mm" = "Mouse"
+                    )) +
+  labs(y = "Mean CpG count",
+       x = "Gene ID",
+       color = "Organism") +
+  guides(y = guide_axis(minor.ticks = TRUE)) +
+  theme_bw() +
+  theme(
+    #Legend manipulation
+    legend.position = "top",
+    legend.title = element_text(size = 14, 
+                                face = "bold"),
+    legend.text = element_text(size = 11,
+                               color= "black"),
+    #Panel manipulation
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black",
+                                linewidth = 1),
+    axis.ticks = element_line(linewidth = 1),
+    axis.ticks.length = unit(5, "pt"),
+    axis.minor.ticks.length = rel(0.5),
+    strip.background = element_rect(fill = "white", color = NA),
+    strip.text = element_text(size = 15,
+                              face = "bold"),
+    #Text manipulation
+    axis.title = element_text(face = "bold",
+                              size = 17),
+    axis.title.x = element_text(margin = margin(t = 7)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.text = element_text(size = 11, 
+                             color = "black")
+  )
+
+
+#ggsave("CpG_GenePlot.png", height = 9, width = 9)
+```
+
+---
+
+### Data analysis
+
+I am doing a GLM with a poisson model and an ANOVA with standardized CpG counts. This is due to the left-skewed data as well as it being count data with a high dispersion. 
+
+**GLM** 
+
+```{r}
+cpg.glm <- glmer.nb(CpGs ~ Cell.type * organism  + (1|Gene_id), 
+                 offset = log(flanking_region *2),
+                 data = CpG_total)
+                 
+ summary(cpg.glm)
+```
+
+### Plotting GLMM 
+
+```{r, predictingChunk}
+#Creating a predicted response for the GLMM 
+predict.2 <- predict_response(cpg.glm, terms = c("Cell.type", "organism"),
+                              condition = list(flanking_region = 0.5))
+
+predict.2
+```
+
+#### Plotting
+
+Predicting the number of CpGs using the NB GLMM created. 
+
+```{r, fig.align='left'}
+#Plotting the predicted variables
+
+predict.Plot <- ggplot(predict.2, aes(x, predicted, color = group)) +
+  geom_point(position = position_dodge(width = 0.5),
+             size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                position = position_dodge(width = 0.5),
+                width = 0.2) +
+  scale_x_discrete(labels = c(
+    both = "Both",
+    cone = "Cone-only",
+    rod = "Rod-only"
+  )) +
+  scale_color_manual(values = c("darkgrey", "orchid"),
+                    labels = c(
+                      "Hs" = "Human",
+                      "Mm" = "Mouse"
+                    )) +
+  labs(y = "Predicted response",
+       x = "Cell type",
+       color = "Species") +
+  guides(y = guide_axis(minor.ticks = TRUE)) +
+  theme_bw()+
+  theme_childFile() +
+  theme(legend.position = "top",
+        panel.grid.major.x = element_line(linetype = "dashed"),
+        legend.background = element_rect(color = "white", 
+                                         linewidth = 0))
+
+predict.Plot
+
+#ggsave("C:/Users/kathe/Downloads/GenePlot.png")
+```
+
+
+#### Creating a plot with the observed means
+
+```{r, fig.align='left'}
+#GLMM uses an offset with the flanking region which needs to be accounted for when plotting. 
+CpG.diff <- CpG_total %>%
+  mutate(
+    standardized = CpGs/(flanking_region * 2)
+  )
+
+#Creating the observed plot
+observed.Plot <- ggplot(CpG.diff, aes(x = Cell.type, y = standardized, color = organism)) +
+  stat_summary(fun = "mean", geom = "point",
+               position = position_dodge(width = 0.5)) +
+  stat_summary(fun.data = "mean_se", geom = "errorbar",
+               position = position_dodge(width = 0.5),
+               width = 0.2) +
+  scale_x_discrete(labels = c(
+    both = "Both",
+    cone = "Cone-only",
+    rod = "Rod-only"
+  )) +
+  scale_color_manual(values = c("darkgrey", "orchid"),
+                    labels = c(
+                      "Hs" = "Human",
+                      "Mm" = "Mouse"
+                    )) +
+  labs(y = "Observed values",
+       x = "Cell type",
+       color = "Species") +
+  guides(y = guide_axis(minor.ticks = TRUE),
+         color = "none") +
+  theme_bw()+
+  theme_childFile() +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_line(linetype = "dashed"),
+        legend.background = element_rect(color = "white", 
+                                         linewidth = 0))
+
+observed.Plot
+```
+
+#### Combining plots for a full figure.
+
+```{r, fig.align='left'}
+full.plot <- observed.Plot | predict.Plot
+
+full.plot + plot_layout(guides = "collect") &
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom",
+        plot.tag = element_text(face = "bold",
+                                size = 17)) 
+
+#ggsave("GLMM_CpG.plot.png", width = 8, height = 6)
+```
+
+#### Checking assumptions for GLMM
+
+Checking assumptions of the dispersion.
+
+```{r}
+library(DHARMa)
+sim_res <- simulateResiduals(cpg.glm)
+plot(sim_res)
+testDispersion(sim_res)
+```
+
+Checking the assumptions for the rest of it.
+
+```{r}
+plot(log(CpG_total$flanking_region * 2), log(CpG_total$CpGs + 0.5))
+#Should show roughly linear trend with slope ~1
+library(lattice)
+dotplot(ranef(cpg.glm, condVar = TRUE))
+#Points should be roughly symmetrically distributed around 0
+```
+
+
+Looking at the exponential version of the coeffecients for interpretation. The coefficents are in log format and need to be converted for proper analysis.
+
+```{r}
+exp(coef(summary(cpg.glm)))
+```
+
+
+
+
